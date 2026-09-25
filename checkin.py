@@ -620,7 +620,7 @@ def checkin_account(
 # ==================== 主流程 ====================
 def main() -> int:
     # 随机启动延迟（0-30 分钟），避免 cron 精确定时被识别为自动化
-    delay = random.uniform(0, 1800)
+    delay = random.uniform(0, 700)
     logger.info("随机延迟 %.0f 秒后开始签到...", delay)
     time.sleep(delay)
 
