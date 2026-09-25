@@ -42,17 +42,17 @@
 
 ### 第二步：获取 GLaDOS Cookie
 
-1. 打开浏览器，登录 https://glados.cloud
+1. 打开浏览器，登录 https://glados.space
 2. 按 **F12** 打开开发者工具
-3. 找到 `Application` → `Cookies` → `glados.cloud`
-4. 复制完整 Cookie 内容
+3. 找到 `Application` → `Cookies` → `glados.space`
+4. 复制完整 Cookie 内容（必须包含 `koa:sess`、`koa:sess.sig`、`gld:sess`、`gld:sess.sig` 四个字段）
 
 示例：
 ```
-koa:sess=xxxxxx; koa:sess.sig=yyyyyy
+koa:sess=xxxxxx; koa:sess.sig=yyyyyy; gld:sess=zzzzzz; gld:sess.sig=wwwwww
 ```
 
-⚠️ **必须是完整的一整段**
+⚠️ **必须是完整的一整段，包含全部 4 个 Cookie 字段**
 
 ---
 

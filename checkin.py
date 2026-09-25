@@ -26,28 +26,120 @@ logging.basicConfig(
 logger = logging.getLogger("GLaDOS")
 
 # ==================== 配置 ====================
-CHECKIN_URL = "https://glados.cloud/api/user/checkin"
-STATUS_URL = "https://glados.cloud/api/user/status"
-POINTS_URL = "https://glados.cloud/api/user/points"
-EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
+CHECKIN_URL = "https://glados.space/api/user/checkin"
+STATUS_URL = "https://glados.space/api/user/status"
+POINTS_URL = "https://glados.space/api/user/points"
+EXCHANGE_URL = "https://glados.space/api/user/exchange"
+# 浏览器 UA 池（定期更新为当前主流 Chrome 版本，避免过时 UA 被识别为脚本）
+UA_LIST = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+]
+
+# sec-ch-ua 池，与 UA_LIST 一一对应（Chrome Client Hints）
+SEC_CH_UA_LIST = [
+    '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+    '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+    '"Google Chrome";v="152", "Not_A Brand";v="8", "Chromium";v="152"',
+    '"Google Chrome";v="152", "Not_A Brand";v="8", "Chromium";v="152"',
+]
+
+SEC_CH_UA_PLATFORM_LIST = ['"macOS"', '"Windows"', '"macOS"', '"Windows"']
+
+# API 请求头模板（POST /api/user/checkin 等 XHR 请求）
+# 按照真实浏览器请求配置，包含完整的 Client Hints 和 Fetch Metadata 头
 HEADERS_BASE = {
-    "origin": "https://glados.cloud",
-    "referer": "https://glados.cloud/console/checkin",
-    "user-agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "origin": "https://glados.space",
+    "referer": "https://glados.space/console/checkin",
+    "accept": "application/json, text/plain, */*",
+    "accept-language": "zh-CN,zh;q=0.9",
+    "sec-ch-ua-mobile": "?0",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
     # 注意：使用 requests 的 json= 参数时会自动设置 Content-Type: application/json，
     # 此处无需（也不应）手动设置 content-type，否则与 requests 默认行为重复。
+    # user-agent / sec-ch-ua / sec-ch-ua-platform 在每次请求时随机选取，不在此固定。
 }
-PAYLOAD = {"token": "glados.cloud"}
+
+# 页面请求头模板（GET /console/checkin 等文档导航请求）
+# 与 API 请求头的关键差异：sec-fetch-dest=document, sec-fetch-mode=navigate, sec-fetch-user=?1
+PAGE_HEADERS = {
+    "accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,image/apng,*/*;q=0.8,"
+               "application/signed-exchange;v=b3;q=0.7"),
+    "accept-language": "zh-CN,zh;q=0.9",
+    "cache-control": "max-age=0",
+    "sec-ch-ua-mobile": "?0",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+    # user-agent / sec-ch-ua / sec-ch-ua-platform 在每次请求时随机选取，不在此固定。
+}
+
+
+def _pick_ua() -> Tuple[str, str, str]:
+    """随机选取一组匹配的 UA / sec-ch-ua / sec-ch-ua-platform。"""
+    idx = random.randint(0, len(UA_LIST) - 1)
+    return UA_LIST[idx], SEC_CH_UA_LIST[idx], SEC_CH_UA_PLATFORM_LIST[idx]
+
+
+def build_api_headers(cookie: str) -> Dict[str, str]:
+    """构建 API 请求头（签到/状态/积分等 XHR），随机 UA + 完整 Client Hints。"""
+    ua, sec_ch_ua, sec_ch_ua_platform = _pick_ua()
+    headers = {
+        **HEADERS_BASE,
+        "user-agent": ua,
+        "sec-ch-ua": sec_ch_ua,
+        "sec-ch-ua-platform": sec_ch_ua_platform,
+        "cookie": cookie,
+    }
+    return headers
+
+
+def build_page_headers(cookie: str) -> Dict[str, str]:
+    """构建页面请求头（文档导航），随机 UA + 完整 Client Hints。"""
+    ua, sec_ch_ua, sec_ch_ua_platform = _pick_ua()
+    headers = {
+        **PAGE_HEADERS,
+        "user-agent": ua,
+        "sec-ch-ua": sec_ch_ua,
+        "sec-ch-ua-platform": sec_ch_ua_platform,
+        "cookie": cookie,
+    }
+    return headers
+
+
+def simulate_browse(session: requests.Session, cookie: str) -> None:
+    """
+    签到前先访问页面，模拟真实浏览器行为链路。
+
+    真实用户会先 GET /console/checkin 加载页面，再点击签到按钮触发 POST。
+    直接 POST API 缺少前置页面访问，是服务端识别自动化的常见特征。
+    此步骤非关键路径，失败不影响签到流程。
+    """
+    headers = build_page_headers(cookie)
+    try:
+        session.get("https://glados.space/console/checkin",
+                     headers=headers, timeout=TIMEOUT)
+        time.sleep(random.uniform(2, 5))  # 模拟阅读页面后点击签到
+    except Exception as e:
+        logger.debug("模拟页面访问失败（非关键步骤）: %s", e)
+PAYLOAD = {"token": "glados.space"}
 TIMEOUT = (5, 15)  # (连接超时, 读取超时)
 MAX_RETRY = 3
 RETRY_MIN_WAIT = 2.0
 RETRY_MAX_WAIT = 10.0
-MIN_DELAY = 1.0
-MAX_DELAY = 2.0
+MIN_DELAY = 3.0
+MAX_DELAY = 8.0
 TELEGRAM_MAX_LENGTH = 4000
 TELEGRAM_TRUNCATE_LENGTH = 3990
 CONTENT_MAX_LENGTH = 3000  # 推送汇总内容统一长度上限，避免超长导致部分渠道发送失败（#4）
@@ -174,10 +266,10 @@ def validate_cookie(cookie: str) -> Tuple[bool, str]:
         return False, "Cookie 为空"
     cookie = cookie.strip()
     keys = {part.split("=", 1)[0].strip() for part in cookie.split(";") if part.strip()}
-    if "koa:sess" not in keys:
-        return False, "Cookie 缺少必要字段: koa:sess"
-    if "koa:sess.sig" not in keys:
-        return False, "Cookie 缺少必要字段: koa:sess.sig"
+    required = ["koa:sess", "koa:sess.sig", "gld:sess", "gld:sess.sig"]
+    missing = [k for k in required if k not in keys]
+    if missing:
+        return False, f"Cookie 缺少必要字段: {', '.join(missing)}"
     return True, ""
 
 
@@ -554,8 +646,12 @@ def checkin_account(
     exchange_plan: 积分兑换计划名（plan100/plan200/plan500），为 None 时不兑换。
     """
     session.cookies.clear()  # 清除上一个账号的残留 Cookie，避免串扰
-    headers = {**HEADERS_BASE}
-    headers["cookie"] = cookie
+
+    # 签到前先模拟页面访问，建立完整的浏览器行为链路
+    simulate_browse(session, cookie)
+
+    # 构建 API 请求头（随机 UA + 完整 Client Hints + Fetch Metadata）
+    headers = build_api_headers(cookie)
 
     email = "unknown"
     days = "-"
@@ -658,6 +754,11 @@ def checkin_account(
 
 # ==================== 主流程 ====================
 def main() -> int:
+    # 随机启动延迟（0-30 分钟），避免 cron 精确定时被识别为自动化
+    delay = random.uniform(0, 1800)
+    logger.info("随机延迟 %.0f 秒后开始签到...", delay)
+    time.sleep(delay)
+
     # H2：支持 ||| 或换行(\n)或 & 分隔多账号 Cookie；推荐使用 ||| 避免与 Cookie 值冲突
     raw = os.getenv("COOKIES", "")
     cookies = [c.strip() for c in re.split(r"\|\|\||[&\n]", raw) if c.strip()]
